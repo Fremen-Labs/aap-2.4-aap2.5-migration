@@ -1,30 +1,89 @@
-- name: Run AAP 2.4 Export Job Template - Single Org
+- name: Run AAP 2.4 Export Job Template (Single Org)
   hosts: localhost
   connection: local
   gather_facts: false
   collections: [ ansible.controller ]
 
   vars:
+    debug_mode: true
     # ---- Controller Connection AAP 2.4 ---- #
     controller_hostname: "{{ lookup('vars', 'aap24_host') }}"
     controller_validate_certs: "{{ aap24_validate_certs | default(true) }}"
     controller_username: "{{ lookup('env','AAP24_USERNAME') | default(omit) }}"
     controller_password: "{{ lookup('env','AAP24_PASSWORD') | default(omit) }}"
-    job_template_name: "AAP24 - Export Single Org"   # <--- CHANGE ME to your Job Template Name
+
+    # ---- The Job Template Already Created In AAP 2.4 ---- #
+    job_template_name: "AAP24 - Export Single Org"   # <--- CHANGE ME to your JT name
+
     # ---- Variables Passed To The Job Template ---- #
+    # These should match what your JT expects, e.g., export_org_name, export_dir, etc.
     job_extra_vars:
       export_org_name: "INSERT_YOUR_ORG_NAME_HERE"
-      # Optional Example overrides match the playbook vars if exposed in the Job Template:
+      # Optional overrides match our playbook vars if exposed in the Job Template:
       # export_dir: "/var/lib/awx/projects/aap-migrate/_export_24"
       # aap24_validate_certs: true
+
+    # Timeout for the JT to finish in seconds
     job_timeout: 7200
 
   tasks:
-    - name: Fail Fast If Username-Password Are Not Provided
+    # ---- Debug to Show What We Are Running On the Agent Executing Ansible ---- #
+    - name: Show Ansible Version
+      ansible.builtin.command: ansible --version
+      register: ansible_ver
+      changed_when: false
+      when: debug_mode | bool
+
+    - name: Print Ansible Version
+      ansible.builtin.debug:
+        msg: "{{ ansible_ver.stdout_lines }}"
+      when: debug_mode | bool and ansible_ver is defined
+
+    - name: Show Collections Search Paths
+      ansible.builtin.command: ansible-config dump | grep -E '^COLLECTIONS_PATHS'
+      register: coll_paths
+      changed_when: false
+      when: debug_mode | bool
+
+    - name: Print Collections Search Paths
+      ansible.builtin.debug:
+        msg: "{{ coll_paths.stdout | default('') }}"
+      when: debug_mode | bool and coll_paths is defined
+
+    - name: List Installed Collections And Versions
+      ansible.builtin.command: ansible-galaxy collection list
+      register: coll_list
+      changed_when: false
+      when: debug_mode | bool
+
+    - name: Print Installed Collections (Raw)
+      ansible.builtin.debug:
+        msg: "{{ coll_list.stdout_lines }}"
+      when: debug_mode | bool and coll_list is defined
+
+    - name: Grep Key Collections (ansible.controller, awx.awx, infra.aap_configuration)
+      ansible.builtin.shell: |
+        set -o pipefail
+        ansible-galaxy collection list | egrep '^(ansible\.controller|awx\.awx|infra\.aap_configuration)'
+      args:
+        executable: /bin/bash
+      register: key_coll_list
+      changed_when: false
+      failed_when: false   # do NOT fail if none are installed
+      when: debug_mode | bool
+
+    - name: Print Key Collections
+      ansible.builtin.debug:
+        msg: "{{ key_coll_list.stdout | default('None found') }}"
+      when: debug_mode | bool
+
+    
+    # ---- Start Job Template Execution ---- #
+    - name: Fail Fast If Username/Password Are Not Provided
       ansible.builtin.fail:
         msg: "AAP24_USERNAME / AAP24_PASSWORD must be set in the environment."
       when: controller_username is omit or controller_password is omit
-
+      
     - name: Launch Job Template
       ansible.controller.job_launch:
         controller_host: "{{ controller_hostname }}"
@@ -50,7 +109,8 @@
         msg: "Job {{ jt_run.id }} ended with status '{{ jt_run.status }}'."
       when: jt_run.status is not defined or jt_run.status != 'successful'
 
-    - name: Get Job Stdout - Optional
+    # (Optional) Fetch stdout if you want it in the automation logs/artifacts
+    - name: Get Job Stdout (Optional)
       ansible.controller.job_stdout:
         controller_host: "{{ controller_hostname }}"
         controller_username: "{{ controller_username }}"
