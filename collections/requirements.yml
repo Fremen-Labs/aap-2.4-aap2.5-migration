@@ -1,0 +1,8 @@
+collections:
+  # Export side (AAP 2.4)
+  - name: ansible.controller          # export module; awx.awx is now ansible.controller
+    version: ">=4.5.0,<4.7.0"
+
+  # Import side (AAP 2.5+)
+  - name: infra.aap_configuration     # validated CaC for AAP 2.5+
+    # optionally pin: version: "==3.0.0"

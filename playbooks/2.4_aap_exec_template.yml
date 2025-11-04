@@ -1,0 +1,67 @@
+- name: Run AAP 2.4 Export Job Template - Single Org
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  collections: [ ansible.controller ]
+
+  vars:
+    # ---- Controller Connection AAP 2.4 ---- #
+    controller_hostname: "{{ lookup('vars', 'aap24_host') }}"
+    controller_validate_certs: "{{ aap24_validate_certs | default(true) }}"
+    controller_username: "{{ lookup('env','AAP24_USERNAME') | default(omit) }}"
+    controller_password: "{{ lookup('env','AAP24_PASSWORD') | default(omit) }}"
+    job_template_name: "AAP24 - Export Single Org"   # <--- CHANGE ME to your Job Template Name
+    # ---- Variables Passed To The Job Template ---- #
+    job_extra_vars:
+      export_org_name: "INSERT_YOUR_ORG_NAME_HERE"
+      # Optional Example overrides match the playbook vars if exposed in the Job Template:
+      # export_dir: "/var/lib/awx/projects/aap-migrate/_export_24"
+      # aap24_validate_certs: true
+    job_timeout: 7200
+
+  tasks:
+    - name: Fail Fast If Username-Password Are Not Provided
+      ansible.builtin.fail:
+        msg: "AAP24_USERNAME / AAP24_PASSWORD must be set in the environment."
+      when: controller_username is omit or controller_password is omit
+
+    - name: Launch Job Template
+      ansible.controller.job_launch:
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        job_template: "{{ job_template_name }}"
+        extra_vars: "{{ job_extra_vars }}"
+        wait: true
+        timeout: "{{ job_timeout }}"
+      register: jt_run
+
+    - name: Show Job Result Summary
+      ansible.builtin.debug:
+        msg:
+          job_id: "{{ jt_run.id | default('unknown') }}"
+          status: "{{ jt_run.status | default('unknown') }}"
+          finished: "{{ jt_run.finished | default('') }}"
+          elapsed: "{{ jt_run.elapsed | default('') }}"
+
+    - name: Fail If Job Did Not Succeed
+      ansible.builtin.fail:
+        msg: "Job {{ jt_run.id }} ended with status '{{ jt_run.status }}'."
+      when: jt_run.status is not defined or jt_run.status != 'successful'
+
+    - name: Get Job Stdout - Optional
+      ansible.controller.job_stdout:
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        job_id: "{{ jt_run.id }}"
+        format: txt
+      register: jt_stdout
+      when: jt_run.id is defined
+
+    - name: Print Job Stdout (Optional)
+      ansible.builtin.debug:
+        msg: "{{ jt_stdout.content | default('') }}"
+      when: jt_stdout is defined and jt_stdout.content is defined

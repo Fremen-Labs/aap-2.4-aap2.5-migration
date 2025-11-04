@@ -1,0 +1,42 @@
+- name: Import Configuration Into AAP 2.5
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  collections: [ infra.aap_configuration ]
+  vars:
+    controller_hostname: "{{ lookup('vars', 'aap25_host') }}"
+    controller_oauthtoken: "{{ lookup('env','AAP25_TOKEN') }}"
+    controller_validate_certs: "{{ aap25_validate_certs | default(true) }}"
+    cac_dir: "{{ playbook_dir }}/../_cac_25"
+
+    controller_organizations: >-
+      {{ (lookup('file', cac_dir ~ '/controller_organizations.yml') | from_yaml).controller_organizations | default([]) }}
+    controller_credentials: >-
+      {{ (lookup('file', cac_dir ~ '/controller_credentials.yml') | from_yaml).controller_credentials | default([]) }}
+    controller_projects: >-
+      {{ (lookup('file', cac_dir ~ '/controller_projects.yml') | from_yaml).controller_projects | default([]) }}
+    controller_inventories: >-
+      {{ (lookup('file', cac_dir ~ '/controller_inventories.yml') | from_yaml).controller_inventories | default([]) }}
+    controller_templates: >-
+      {{ (lookup('file', cac_dir ~ '/controller_templates.yml') | from_yaml).controller_templates | default([]) }}
+    controller_workflows: >-
+      {{ (lookup('file', cac_dir ~ '/controller_workflows.yml') | from_yaml).controller_workflows | default([]) }}
+    controller_execution_environments: >-
+      {{
+        (lookup('file', cac_dir ~ '/controller_execution_environments.yml')
+         | from_yaml).controller_execution_environments | default([])
+      }}
+
+    controller_configuration_collect_logs: true
+
+  tasks:
+    - import_role: { name: controller_organizations }
+    - import_role: { name: controller_execution_environments }
+    - import_role: { name: controller_projects }
+    - import_role: { name: controller_credentials }
+    - import_role: { name: controller_inventories }
+    - import_role: { name: controller_templates }
+    - import_role: { name: controller_workflows }
+
+    # Alternative once comfortable:
+    # - import_role: { name: dispatch }

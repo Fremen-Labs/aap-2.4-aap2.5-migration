@@ -1,0 +1,135 @@
+---
+- name: Validate AAP 2.5 Import With AAP 2.4 Exports
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    controller_hostname: "{{ lookup('vars', 'aap25_host') }}"
+    controller_oauthtoken: "{{ lookup('env', 'AAP25_TOKEN') }}"
+    controller_validate_certs: "{{ aap25_validate_certs | default(true) }}"
+    export_dir: "{{ playbook_dir }}/../_export_24"
+
+    # Map of export_file: api_path to validate counts
+    resources:
+      organizations: "/api/v2/organizations/"
+      projects: "/api/v2/projects/"
+      inventories: "/api/v2/inventories/"
+      credentials: "/api/v2/credentials/"
+      job_templates: "/api/v2/job_templates/"
+      workflow_job_templates: "/api/v2/workflow_job_templates/"
+      execution_environments: "/api/v2/execution_environments/"
+
+  tasks:
+    - name: Ensure Export Directory Exists
+      ansible.builtin.stat:
+        path: "{{ export_dir }}"
+      register: expdir
+
+    - name: Fail If Export Directory Is Missing
+      ansible.builtin.fail:
+        msg: "Export directory {{ export_dir }} not found. Run the 2.4 export first."
+      when: not expdir.stat.exists
+
+    - name: Load Export Counts
+      ansible.builtin.set_fact:
+        export_counts: >-
+          {{
+            dict(resources.keys()
+            | zip(resources.keys()
+              | map('regex_replace','^(.*)$','\\1.json')
+              | map('community.general.read_json', export_dir ~ '/' + item)
+            ))
+          }}
+      vars:
+        item: "{{ item }}"
+      loop: "{{ resources.keys() }}"
+      loop_control: { label: "{{ item }}" }
+
+    - name: Normalize Export Counts
+      ansible.builtin.set_fact:
+        export_counts: >-
+          {{
+            dict(export_counts | dict2items
+            | map(attribute='key')
+            | zip(
+                export_counts | dict2items
+                | map(attribute='value')
+                | map('length', default=0)
+              )
+            )
+          }}
+
+    - name: Query Live AAP 2.5 Counts
+      vars:
+        endpoint: "{{ controller_hostname.rstrip('/') ~ resources[item] }}"
+      block:
+        - name: Init Pagination
+          ansible.builtin.set_fact:
+            page_url: "{{ endpoint }}"
+            live_items: []
+
+        - name: Fetch Page
+          ansible.builtin.uri:
+            url: "{{ page_url }}"
+            method: GET
+            headers:
+              Authorization: "Bearer {{ controller_oauthtoken }}"
+            validate_certs: "{{ controller_validate_certs }}"
+            return_content: true
+          register: page
+          until: page.status in [200]
+          retries: 3
+          delay: 2
+
+        - name: Accumulate Items
+          ansible.builtin.set_fact:
+            live_items: "{{ live_items + (page.json.results | default([])) }}"
+            page_url: "{{ page.json.next | default(omit) }}"
+        - name: Continue If Next Page
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/validate_2.5.yml"
+          when: page_url is defined and page_url
+      loop: "{{ resources.keys() }}"
+      loop_control:
+        loop_var: item
+        label: "{{ item }}"
+      register: live_collect
+      rescue:
+        - ansible.builtin.fail:
+            msg: "Failed to query AAP 2.5 API at {{ endpoint }}"
+
+    - name: Build Live Counts Dict
+      ansible.builtin.set_fact:
+        live_counts: >-
+          {{
+            dict(
+              resources.keys()
+              | zip(
+                  live_collect.results
+                  | map(attribute='ansible_facts.live_items', default=[])
+                  | map('length')
+                )
+            )
+          }}
+
+    - name: Show Counts of Export and Import
+      ansible.builtin.debug:
+        var: export_counts
+    - ansible.builtin.debug:
+        var: live_counts
+
+    - name: Assert Counts Match
+      vars:
+        mismatches: >-
+          {{
+            resources.keys()
+            | select('reject','equalto',None)
+            | select('reject','equalto','')
+            | map('string')
+            | select('select','x', export_counts, live_counts)
+          }}
+      assert:
+        that:
+          - export_counts == live_counts
+        fail_msg: "Post-import validation failed: counts differ. See debug output above."
+        success_msg: "Post-import validation passed: counts match."

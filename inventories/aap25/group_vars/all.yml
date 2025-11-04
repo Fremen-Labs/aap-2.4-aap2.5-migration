@@ -1,0 +1,2 @@
+aap25_host: "https://aap25.example.com"
+aap25_validate_certs: true

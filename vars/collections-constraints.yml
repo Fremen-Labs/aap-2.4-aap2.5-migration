@@ -1,0 +1,6 @@
+---
+# This will allow Ally to define or override specific collection variables or limits like timeouts, retries, etc. Example below:
+# We can safely leave these empty unless Ally enforces strict ordering or advanced tuning.
+
+# controller_configuration_collect_logs: true
+# controller_configuration_async_retries: 3

@@ -1,0 +1,2 @@
+aap24_host: "https://aap24.example.com"
+aap24_validate_certs: true

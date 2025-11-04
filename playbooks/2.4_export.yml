@@ -1,0 +1,55 @@
+- name: Export AAP 2.4 Configuration All Objects
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  collections: [ ansible.controller ]
+  vars:
+    controller_hostname: "{{ lookup('vars', 'aap24_host') }}"
+    controller_oauthtoken: "{{ lookup('env','AAP24_TOKEN') }}"
+    controller_validate_certs: "{{ aap24_validate_certs | default(true) }}"
+    export_dir: "{{ playbook_dir }}/../_export_24"
+
+    export_objects:
+      - organizations
+      # - users
+      # - teams
+      - credential_types
+      - credentials
+      - projects
+      - inventories
+      # - inventory_sources
+      - execution_environments
+      - job_templates
+      - workflow_job_templates
+      # - applications
+      # - notification_templates
+      # - schedules
+
+  tasks:
+    - name: Ensure Export Directory Exists
+      ansible.builtin.file:
+        path: "{{ export_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Export Each Object Type to JSON
+      ansible.controller.export:
+        controller_host: "{{ controller_hostname }}"
+        controller_oauthtoken: "{{ controller_oauthtoken }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        resource: "{{ item }}"
+      register: export_results
+      loop: "{{ export_objects }}"
+      loop_control: { label: "{{ item }}" }
+
+    - name: Write Export Files
+      ansible.builtin.copy:
+        content: >-
+          {{
+            (export_results.results
+            | selectattr('item','equalto', item)
+            | first).resources | to_nice_json
+          }}
+        dest: "{{ export_dir }}/{{ item }}.json"
+      loop: "{{ export_objects }}"
+      loop_control: { label: "{{ item }}" }

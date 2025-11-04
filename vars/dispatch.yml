@@ -1,0 +1,6 @@
+---
+# used if Ally leverages the dispatch meta-role in infra.aap_configuration. We can control import order or skip certain roles like the example below:
+# dispatch_roles:
+#   - controller_organizations
+#   - controller_execution_environments
+#   - controller_projects

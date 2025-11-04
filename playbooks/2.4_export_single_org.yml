@@ -1,0 +1,134 @@
+- name: Export AAP 2.4 - Single Organization Only (Basic Auth)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  collections: [ ansible.controller ]
+
+  vars:
+    export_org_name: "INSERT_YOUR_ORG_NAME_HERE"
+    # Connection info
+    controller_hostname: "{{ lookup('vars', 'aap24_host') }}"
+    controller_validate_certs: "{{ aap24_validate_certs | default(true) }}"
+    controller_username: "{{ lookup('env','AAP24_USERNAME') | default(omit) }}"
+    controller_password: "{{ lookup('env','AAP24_PASSWORD') | default(omit) }}"
+    export_dir: "{{ playbook_dir }}/../_export_24"
+    # Resources that are GLOBAL (no org filter)
+    global_resources:
+      - credential_types
+    # Resources that support org filtering
+    org_scoped_resources:
+      - organizations            # Filtered By Name - Single Record
+      - credentials
+      - projects
+      - inventories
+      - job_templates
+      - workflow_job_templates
+      - execution_environments
+      # - teams
+      # - users
+      # - inventory_sources
+      # - applications
+      # - notification_templates
+      # - schedules
+
+  tasks:
+    # ---------- PREFLIGHT ---------- #
+    - name: Fail Fast If Username-Password Are Not Provided
+      ansible.builtin.fail:
+        msg: "AAP24_USERNAME / AAP24_PASSWORD must be set in the environment."
+      when: controller_username is omit or controller_password is omit
+
+    - name: Ensure Export Directory Exists
+      ansible.builtin.file:
+        path: "{{ export_dir }}"
+        state: directory
+        mode: "0755"
+
+    # ---------- ORG LOOKUP ---------- #
+    - name: Lookup Organization By Name (Get ID)
+      ansible.builtin.uri:
+        url: "{{ (controller_hostname | regex_replace('/+$','')) ~ '/api/v2/organizations/?name=' ~ (export_org_name | urlencode) }}"
+        method: GET
+        url_username: "{{ controller_username }}"
+        url_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        return_content: true
+      register: org_lookup
+
+    - name: Fail If Organization Not Found
+      ansible.builtin.fail:
+        msg: "Organization '{{ export_org_name }}' not found on {{ controller_hostname }}"
+      when: "(org_lookup.json.count | default(0)) | int == 0"
+
+    - name: Set Organization ID Fact
+      ansible.builtin.set_fact:
+        export_org_id: "{{ org_lookup.json.results[0].id }}"
+
+    # ---------- GLOBAL RESOURCES - NO ORG FILTER ---------- #
+    - name: Export Global Resources To JSON
+      ansible.controller.export:
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        resource: "{{ item }}"
+      loop: "{{ global_resources }}"
+      loop_control: { label: "{{ item }}" }
+      register: global_export
+
+    - name: Write Global Export Files
+      ansible.builtin.copy:
+        content: >-
+          {{
+            (global_export.results
+             | selectattr('item','equalto', item)
+             | first).resources | to_nice_json
+          }}
+        dest: "{{ export_dir }}/{{ item }}.json"
+      loop: "{{ global_resources }}"
+      loop_control: { label: "{{ item }}" }
+
+    # ---------- ORGANIZATIONS SINGLE RECORD BY NAME ---------- #
+    - name: Export Organization By Name
+      ansible.controller.export:
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        resource: "organizations"
+        query_params:
+          name: "{{ export_org_name }}"
+      register: org_only_export
+
+    - name: Write Organizations.json (Single Org)
+      ansible.builtin.copy:
+        content: "{{ org_only_export.resources | to_nice_json }}"
+        dest: "{{ export_dir }}/organizations.json"
+
+    # ---------- ORG-SCOPED FILTERED BY ORG ID ---------- #
+    - name: Export Org-Scoped Resources Filtered By Organization ID
+      ansible.controller.export:
+        controller_host: "{{ controller_hostname }}"
+        controller_username: "{{ controller_username }}"
+        controller_password: "{{ controller_password }}"
+        validate_certs: "{{ controller_validate_certs }}"
+        resource: "{{ item }}"
+        query_params:
+          organization: "{{ export_org_id }}"
+      when: item != 'organizations'
+      loop: "{{ org_scoped_resources }}"
+      loop_control: { label: "{{ item }}" }
+      register: org_scoped_export
+
+    - name: Write Org-Scoped Export Files
+      ansible.builtin.copy:
+        content: >-
+          {{
+            (org_scoped_export.results
+             | selectattr('item','equalto', item)
+             | first).resources | to_nice_json
+          }}
+        dest: "{{ export_dir }}/{{ item }}.json"
+      when: item != 'organizations'
+      loop: "{{ org_scoped_resources }}"
+      loop_control: { label: "{{ item }}" }

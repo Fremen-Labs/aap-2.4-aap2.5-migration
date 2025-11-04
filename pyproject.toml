@@ -1,0 +1,12 @@
+# This is NOT required, but it is good practice to use it when: 
+# we manage python dependencies, consistent linting like python black, or if we want to define entry points or testing configs.
+
+[project]
+name = "aap-migrate-24to25"
+version = "0.0.1"
+description = "Automated migration from AAP 2.4 to AAP 2.5"
+requires-python = ">=3.9"
+dependencies = ["pyyaml>=6.0"]
+
+[tool.black]
+line-length = 100
