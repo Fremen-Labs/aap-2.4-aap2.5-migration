@@ -1,0 +1,6 @@
+---
+aap_hostname: ''
+aap_password: ''
+aap_username: ''
+aap_validate_certs: false
+...

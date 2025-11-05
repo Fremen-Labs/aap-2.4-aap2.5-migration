@@ -1,0 +1,40 @@
+---
+hub_collections:
+  - namespace: infra
+    name: galaxy
+    path: /home/runner/work/{{ git_repo_name }}/{{ git_repo_name }}/infra-aap_configuration-1.0.0.tar.gz
+    wait: true
+    interaval: 5
+    auto_approve: true
+    timeout: 180
+  - namespace: infra
+    name: aap_utilities
+    path: /var/tmp/aap_utilities/infra-aap_utilities-2.3.0-devel.tar.gz
+    wait: true
+    interaval: 5
+    auto_approve: true
+    timeout: 180
+
+hub_collections_overwrite:
+  - namespace: infra
+    name: galaxy
+    path: /home/runner/work/{{ git_repo_name }}/{{ git_repo_name }}/infra-aap_configuration-1.0.0.tar.gz
+    wait: true
+    interaval: 5
+    auto_approve: true
+    timeout: 180
+    overwrite_existing: true
+
+hub_collections_delete:
+  - namespace: galaxy
+    name: galaxy
+    state: absent
+
+ah_git_collections:
+  - collection_name: collection_test
+    git_url: https://github.com/sean-m-sullivan/collection_test
+
+ansible_config_path: "{{ hub_configuration_working_dir }}/ansible.cfg"
+hub_configuration_collection_async_retries: 100
+hub_configuration_collection_async_delay: 10
+...

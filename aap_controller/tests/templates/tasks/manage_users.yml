@@ -1,0 +1,13 @@
+---
+- name: Include users vars
+  ansible.builtin.include_vars: ../vars/controller_users.yml
+  tags:
+    - users
+    - alltags
+
+- import_role:
+    name: infra.aap_configuration.users
+  tags:
+    - users
+    - alltags
+...
