@@ -99,7 +99,7 @@
                   resource: "{{ resource }}"
                   count: "{{ global_page.json.count | default('no count field') }}"
                   json_keys: "{{ global_page.json | list }}"
-                  full_json: "{{ global_page.json | to_nice_json | split('\n') }}"
+                  full_json: "{{ global_page.json | to_nice_json | split('\n') | map('regex_replace', '\\\\', '') | list }}"
               when: debug_mode | bool
 
         - name: Write Global Resource Export File

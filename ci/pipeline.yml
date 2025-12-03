@@ -15,6 +15,13 @@ export_aap24:
   only:
     - develop   # your default branch.
 
+upload_aap24_export_artifact:
+artifacts:
+  paths:
+   - _export_24/    # <-- all JSON here will be uploaded as artifacts
+  expire_in: 1 week   # how long GitLab keeps them (adjust as needed)
+  when: always
+
 commit_aap24_export:
   stage: commit
   image: alpine:latest
