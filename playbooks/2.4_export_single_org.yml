@@ -1,23 +1,24 @@
-- name: Export AAP 2.4 - Single Organization Only (Basic Auth)
+- name: Export AAP 2.4 - Single Organization Only (Basic Auth, URI)
   hosts: localhost
   connection: local
   gather_facts: false
-  collections: [ ansible.controller ]
+  collections: [ ansible.controller ] # Not really needed, but kept here as a ref
 
   vars:
     export_org_name: "INSERT_YOUR_ORG_NAME_HERE"
-    # Connection info
     controller_hostname: "{{ lookup('vars', 'aap24_host') }}"
     controller_validate_certs: "{{ aap24_validate_certs | default(true) }}"
-    controller_username: "{{ lookup('env','AAP24_USERNAME') | default(omit) }}"
-    controller_password: "{{ lookup('env','AAP24_PASSWORD') | default(omit) }}"
+    controller_username: "{{ lookup('env','AAP24_USERNAME') }}"
+    controller_password: "{{ lookup('env','AAP24_PASSWORD') }}"
     export_dir: "{{ playbook_dir }}/../_export_24"
-    # Resources that are GLOBAL (no org filter)
+
+    # Resources that are GLOBAL no org filter
     global_resources:
       - credential_types
-    # Resources that support org filtering
+
+    # Resources that should be filtered by org
     org_scoped_resources:
-      - organizations            # Filtered By Name - Single Record
+      - organizations            # Single org by name
       - credentials
       - projects
       - inventories
@@ -32,8 +33,8 @@
       # - schedules
 
   tasks:
-    # ---------- PREFLIGHT ---------- #
-    - name: Fail Fast If Username-Password Are Not Provided
+    # ---------- PREFLIGHT ----------
+    - name: Fail Fast If Username/Password Are Not Provided
       ansible.builtin.fail:
         msg: "AAP24_USERNAME / AAP24_PASSWORD must be set in the environment."
       when: controller_username is omit or controller_password is omit
@@ -44,91 +45,112 @@
         state: directory
         mode: "0755"
 
-    # ---------- ORG LOOKUP ---------- #
+    - name: Set API Base URL Fact
+      ansible.builtin.set_fact:
+        api_base: "{{ (controller_hostname | regex_replace('/+$','')) ~ '/api/v2' }}"
+
+    # ---------- ORG LOOKUP ----------
     - name: Lookup Organization By Name (Get ID)
       ansible.builtin.uri:
-        url: "{{ (controller_hostname | regex_replace('/+$','')) ~ '/api/v2/organizations/?name=' ~ (export_org_name | urlencode) }}"
+        url: "{{ api_base }}/organizations/?name={{ export_org_name | urlencode }}"
         method: GET
         url_username: "{{ controller_username }}"
         url_password: "{{ controller_password }}"
         validate_certs: "{{ controller_validate_certs }}"
         return_content: true
+        force_basic_auth: true
       register: org_lookup
 
     - name: Fail If Organization Not Found
       ansible.builtin.fail:
-        msg: "Organization '{{ export_org_name }}' not found on {{ controller_hostname }}"
+        msg: "Organization '{{ export_org_name }}' NOT FOUND ON {{ controller_hostname }}"
       when: "(org_lookup.json.count | default(0)) | int == 0"
 
     - name: Set Organization ID Fact
       ansible.builtin.set_fact:
         export_org_id: "{{ org_lookup.json.results[0].id }}"
 
-    # ---------- GLOBAL RESOURCES - NO ORG FILTER ---------- #
-    - name: Export Global Resources To JSON
-      ansible.controller.export:
-        controller_host: "{{ controller_hostname }}"
-        controller_username: "{{ controller_username }}"
-        controller_password: "{{ controller_password }}"
-        validate_certs: "{{ controller_validate_certs }}"
+    # ---------- GLOBAL RESOURCES NO ORG FILTER ----------
+    - name: Export Global Resources To JSON (Via API)
+      vars:
         resource: "{{ item }}"
       loop: "{{ global_resources }}"
-      loop_control: { label: "{{ item }}" }
-      register: global_export
+      loop_control:
+        label: "{{ item }}"
+      block:
+        - name: Init Pagination For Global Resource
+          ansible.builtin.set_fact:
+            page_url: "{{ api_base }}/{{ resource }}/"
+            all_items: []
 
-    - name: Write Global Export Files
+        - name: Fetch Global Resource Pages
+          block:
+            - name: GET Global Resource Page
+              ansible.builtin.uri:
+                url: "{{ page_url }}"
+                method: GET
+                url_username: "{{ controller_username }}"
+                url_password: "{{ controller_password }}"
+                validate_certs: "{{ controller_validate_certs }}"
+                return_content: true
+                force_basic_auth: true
+              register: page
+
+            - name: Accumulate Global Resource Items
+              ansible.builtin.set_fact:
+                all_items: "{{ all_items + (page.json.results | default([])) }}"
+                page_url: "{{ page.json.next | default('') }}"
+          until: page.json.next is not defined or not page.json.next
+          retries: 50
+          delay: 0
+
+        - name: Write Global Resource Export File
+          ansible.builtin.copy:
+            content: "{{ all_items | to_nice_json }}"
+            dest: "{{ export_dir }}/{{ resource }}.json"
+
+    # ---------- ORGANIZATIONS SINGLE RECORD BY NAME ----------
+    - name: Write Organizations.json For Single Org
       ansible.builtin.copy:
-        content: >-
-          {{
-            (global_export.results
-             | selectattr('item','equalto', item)
-             | first).resources | to_nice_json
-          }}
-        dest: "{{ export_dir }}/{{ item }}.json"
-      loop: "{{ global_resources }}"
-      loop_control: { label: "{{ item }}" }
-
-    # ---------- ORGANIZATIONS SINGLE RECORD BY NAME ---------- #
-    - name: Export Organization By Name
-      ansible.controller.export:
-        controller_host: "{{ controller_hostname }}"
-        controller_username: "{{ controller_username }}"
-        controller_password: "{{ controller_password }}"
-        validate_certs: "{{ controller_validate_certs }}"
-        resource: "organizations"
-        query_params:
-          name: "{{ export_org_name }}"
-      register: org_only_export
-
-    - name: Write Organizations.json (Single Org)
-      ansible.builtin.copy:
-        content: "{{ org_only_export.resources | to_nice_json }}"
+        content: "{{ org_lookup.json.results | to_nice_json }}"
         dest: "{{ export_dir }}/organizations.json"
 
-    # ---------- ORG-SCOPED FILTERED BY ORG ID ---------- #
-    - name: Export Org-Scoped Resources Filtered By Organization ID
-      ansible.controller.export:
-        controller_host: "{{ controller_hostname }}"
-        controller_username: "{{ controller_username }}"
-        controller_password: "{{ controller_password }}"
-        validate_certs: "{{ controller_validate_certs }}"
+    # ---------- ORG-SCOPED RESOURCES FILTERED BY ORG ID ----------
+    - name: Export Org-Scoped Resources Filtered By Organization ID (Via API)
+      vars:
         resource: "{{ item }}"
-        query_params:
-          organization: "{{ export_org_id }}"
       when: item != 'organizations'
       loop: "{{ org_scoped_resources }}"
-      loop_control: { label: "{{ item }}" }
-      register: org_scoped_export
+      loop_control:
+        label: "{{ item }}"
+      block:
+        - name: Init Pagination For Org-Scoped Resource
+          ansible.builtin.set_fact:
+            page_url: "{{ api_base }}/{{ resource }}/?organization={{ export_org_id }}"
+            all_items: []
 
-    - name: Write Org-Scoped Export Files
-      ansible.builtin.copy:
-        content: >-
-          {{
-            (org_scoped_export.results
-             | selectattr('item','equalto', item)
-             | first).resources | to_nice_json
-          }}
-        dest: "{{ export_dir }}/{{ item }}.json"
-      when: item != 'organizations'
-      loop: "{{ org_scoped_resources }}"
-      loop_control: { label: "{{ item }}" }
+        - name: Fetch Org-Scoped Resource Pages
+          block:
+            - name: GET Org-Scoped Resource Page
+              ansible.builtin.uri:
+                url: "{{ page_url }}"
+                method: GET
+                url_username: "{{ controller_username }}"
+                url_password: "{{ controller_password }}"
+                validate_certs: "{{ controller_validate_certs }}"
+                return_content: true
+                force_basic_auth: true
+              register: page
+
+            - name: Accumulate Org-Scoped Resource Items
+              ansible.builtin.set_fact:
+                all_items: "{{ all_items + (page.json.results | default([])) }}"
+                page_url: "{{ page.json.next | default('') }}"
+          until: page.json.next is not defined or not page.json.next
+          retries: 50
+          delay: 0
+
+        - name: Write Org-Scoped Export File
+          ansible.builtin.copy:
+            content: "{{ all_items | to_nice_json }}"
+            dest: "{{ export_dir }}/{{ resource }}.json"
