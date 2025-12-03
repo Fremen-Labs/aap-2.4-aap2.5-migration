@@ -11,6 +11,7 @@
     controller_username: "{{ lookup('env','AAP24_USERNAME') }}"
     controller_password: "{{ lookup('env','AAP24_PASSWORD') }}"
     export_dir: "{{ playbook_dir }}/../_export_24"
+    page_size: 200
 
     # Resources that are GLOBAL no org filter
     global_resources:
@@ -78,35 +79,31 @@
       loop_control:
         label: "{{ item }}"
       block:
-        - name: Init Pagination For Global Resource
-          ansible.builtin.set_fact:
-            page_url: "{{ api_base }}/{{ resource }}/"
-            all_items: []
-
         - name: Fetch Global Resource Pages
           block:
             - name: GET Global Resource Page
               ansible.builtin.uri:
-                url: "{{ page_url }}"
+                url: "{{ api_base }}/{{ resource }}/?page_size={{ page_size }}"
                 method: GET
                 url_username: "{{ controller_username }}"
                 url_password: "{{ controller_password }}"
                 validate_certs: "{{ controller_validate_certs }}"
                 return_content: true
                 force_basic_auth: true
-              register: page
-
-            - name: Accumulate Global Resource Items
-              ansible.builtin.set_fact:
-                all_items: "{{ all_items + (page.json.results | default([])) }}"
-                page_url: "{{ page.json.next | default('') }}"
-          until: page.json.next is not defined or not page.json.next
-          retries: 50
-          delay: 0
+              register: global_page
+            
+            - name: Print Page From GET Global Resource Page Task
+              ansible.builtin.debug:
+                msg:
+                  resource: "{{ resource }}"
+                  count: "{{ global_page.json.count | default('no count field') }}"
+                  json_keys: "{{ global_page.json | list }}"
+                  full_json: "{{ global_page.json | to_nice_json }}"
+              when: debug_mode | bool
 
         - name: Write Global Resource Export File
           ansible.builtin.copy:
-            content: "{{ all_items | to_nice_json }}"
+            content: "{{ global_page.json.results | default([]) | to_nice_json }}"
             dest: "{{ export_dir }}/{{ resource }}.json"
 
     # ---------- ORGANIZATIONS SINGLE RECORD BY NAME ----------
