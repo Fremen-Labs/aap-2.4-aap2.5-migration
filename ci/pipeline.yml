@@ -1,0 +1,65 @@
+stages:
+  - export
+  - commit
+
+export_aap24:
+  stage: export
+  image: python:3.11
+  script:
+    - pip install ansible
+    - ansible-playbook -i inventories/aap24 playbooks/export_aap24_single_org.yml
+  artifacts:
+    paths:
+      - _export_24/
+    expire_in: 1 week
+  only:
+    - develop   # your default branch.
+
+commit_aap24_export:
+  stage: commit
+  image: alpine:latest
+  needs:
+    - export_aap24
+  variables:
+    GIT_AUTHOR_NAME: "devops_bot@example.com"
+    GIT_AUTHOR_EMAIL: "devops_bot@example.com"
+    GIT_COMMITTER_NAME: "DevOps Bot"
+    GIT_COMMITTER_EMAIL: "devops_bot@example.com"
+  before_script:
+    - apk add --no-cache git curl
+    - git config --global user.name "$GIT_AUTHOR_NAME"
+    - git config --global user.email "$GIT_AUTHOR_EMAIL"
+  script:
+    # Create a new branch name based on pipeline ID
+    - export BRANCH_NAME="aap24-export-${CI_PIPELINE_ID}"
+    # Ensure we have the latest default branch
+    - git fetch origin "$CI_DEFAULT_BRANCH"
+    - git checkout -b "$BRANCH_NAME" "origin/$CI_DEFAULT_BRANCH"
+    # Add the exported JSON files
+    - git status
+    - git add _export_24/*.json
+
+    # If there are no changes, exit gracefully
+    - |
+      if git diff --cached --quiet; then
+        echo "No changes to commit. Exiting."
+        exit 0
+      fi
+
+    - git commit -m "chore: add AAP 2.4 export for ${EXPORT_ORG_NAME:-org}"
+    - git push origin "$BRANCH_NAME"
+
+    # Create Merge Request via GitLab API
+    # Requires GITLAB_API_TOKEN stored as a protected CI variable
+    - |
+      MR_TITLE="AAP 2.4 export for ${EXPORT_ORG_NAME:-org}"
+      MR_DESC="Automated export from AAP 2.4 for org: ${EXPORT_ORG_NAME:-org} (pipeline ${CI_PIPELINE_ID})."
+
+      curl --request POST "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests" \
+        --header "PRIVATE-TOKEN: ${GITLAB_API_TOKEN}" \
+        --data "source_branch=${BRANCH_NAME}" \
+        --data "target_branch=${CI_DEFAULT_BRANCH}" \
+        --data-urlencode "title=${MR_TITLE}" \
+        --data-urlencode "description=${MR_DESC}"
+  only:
+    - develop   # or your default branch
