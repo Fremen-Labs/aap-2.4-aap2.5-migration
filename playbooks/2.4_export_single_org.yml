@@ -12,6 +12,7 @@
     controller_password: "{{ lookup('env','AAP24_PASSWORD') }}"
     export_dir: "{{ playbook_dir }}/../_export_24"
     page_size: 200
+    debug_mode: true
 
     # Resources that are GLOBAL no org filter
     global_resources:
@@ -113,41 +114,36 @@
         dest: "{{ export_dir }}/organizations.json"
 
     # ---------- ORG-SCOPED RESOURCES FILTERED BY ORG ID ----------
-    - name: Export Org-Scoped Resources Filtered By Organization ID (Via API)
+    - name: Export Org-Scoped Resources Filtered By Organization ID Via API
       vars:
-        resource: "{{ item }}"
-      when: item != 'organizations'
+        resource: "{{ org_resource }}"
       loop: "{{ org_scoped_resources }}"
       loop_control:
-        label: "{{ item }}"
+        loop_var: org_resource
+        label: "{{ org_resource }}"
+      when: org_resource != 'organizations'
       block:
-        - name: Init Pagination For Org-Scoped Resource
-          ansible.builtin.set_fact:
-            page_url: "{{ api_base }}/{{ resource }}/?organization={{ export_org_id }}"
-            all_items: []
+        - name: GET Org-Scoped Resource List
+          ansible.builtin.uri:
+            url: "{{ api_base }}/{{ resource }}/?organization={{ export_org_id }}&page_size={{ page_size }}"
+            method: GET
+            url_username: "{{ controller_username }}"
+            url_password: "{{ controller_password }}"
+            force_basic_auth: true
+            validate_certs: "{{ controller_validate_certs }}"
+            return_content: true
+          register: org_page
 
-        - name: Fetch Org-Scoped Resource Pages
-          block:
-            - name: GET Org-Scoped Resource Page
-              ansible.builtin.uri:
-                url: "{{ page_url }}"
-                method: GET
-                url_username: "{{ controller_username }}"
-                url_password: "{{ controller_password }}"
-                validate_certs: "{{ controller_validate_certs }}"
-                return_content: true
-                force_basic_auth: true
-              register: page
-
-            - name: Accumulate Org-Scoped Resource Items
-              ansible.builtin.set_fact:
-                all_items: "{{ all_items + (page.json.results | default([])) }}"
-                page_url: "{{ page.json.next | default('') }}"
-          until: page.json.next is not defined or not page.json.next
-          retries: 50
-          delay: 0
+        - name: Debug Org-Scoped Resource Response
+          ansible.builtin.debug:
+            msg:
+              resource: "{{ resource }}"
+              count: "{{ org_page.json.count | default('no count field') }}"
+              json_keys: "{{ org_page.json.keys() | list }}"
+              full_json: "{{ org_page.json | to_nice_json }}"
+          when: debug_mode | bool
 
         - name: Write Org-Scoped Export File
           ansible.builtin.copy:
-            content: "{{ all_items | to_nice_json }}"
+            content: "{{ (org_page.json.results | default([])) | to_nice_json }}"
             dest: "{{ export_dir }}/{{ resource }}.json"
