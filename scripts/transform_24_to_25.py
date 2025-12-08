@@ -15,7 +15,7 @@ Input directory:
     job_templates.json
     workflow_job_templates.json
     execution_environments.json
-    (others may be present but are not required)
+    inventory_hosts.json
 
 Output directory:
   ./_cac_25/
@@ -23,6 +23,7 @@ Output directory:
     controller_credentials.yml
     controller_projects.yml
     controller_inventories.yml
+    controller_hosts.yml
     controller_templates.yml
     controller_workflows.yml
     controller_execution_environments.yml
@@ -32,7 +33,7 @@ Notes
 * IDs are dropped; relationships are preserved by *name* to avoid brittle mappings.
 * Sensitive credential inputs (passwords, tokens, private keys) are stripped;
   rehydrate them during import from a secrets source (Ansible Vault, AWS SM).
-* Extend the normalizers if you need additional objects (notifications, schedules, RBAC).
+* Inventory hosts must exist in controller_hosts.yml for inventories to appear active.
 """
 
 from __future__ import annotations
@@ -41,14 +42,13 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 import yaml
 
 EXPORT_DIR = Path("./_export_24")
 OUTPUT_DIR = Path("./_cac_25")
 
-# Map 2.4 credential type 'name' to the 2.5 display names used by infra.aap_configuration
 CREDTYPE_MAP: Dict[str, str] = {
     "Machine": "Machine",
     "Source Control": "Source Control",
@@ -99,16 +99,15 @@ def _name(obj_or_name: Any) -> Optional[str]:
     return None
 
 
+# ----------------- NORMALIZERS -----------------
+
 def normalize_org(o: Mapping[str, Any]) -> Dict[str, Any]:
     """
     Normalize an Organization object.
 
     Keeps only the fields relevant to infra.aap_configuration's controller_organizations.
     """
-    return {
-        "name": _stripped(o.get("name")),
-        "state": "present",
-    }
+    return {"name": _stripped(o.get("name")), "state": "present"}
 
 
 def normalize_credential(c: Mapping[str, Any]) -> Dict[str, Any]:
@@ -119,12 +118,10 @@ def normalize_credential(c: Mapping[str, Any]) -> Dict[str, Any]:
     - Removes sensitive fields from inputs (to be rehydrated from a secret source).
     """
     ct = c.get("credential_type") or {}
-    ct_name = ct.get("name") or c.get("kind")
-    ct_name = CREDTYPE_MAP.get(ct_name, ct_name)
+    ct_name = CREDTYPE_MAP.get(ct.get("name") or c.get("kind"), ct.get("name"))
 
-    org = _name(c.get("organization")) or _name(c.get("organization_id"))
+    org = _name(c.get("organization"))
     inputs = dict(c.get("inputs") or {})
-
     for key in ("password", "secret", "ssh_key_data", "ssh_key_unlock", "token", "client_secret", "become_password"):
         inputs.pop(key, None)
 
@@ -133,7 +130,7 @@ def normalize_credential(c: Mapping[str, Any]) -> Dict[str, Any]:
         "description": c.get("description") or "",
         "organization": _stripped(org) if org else None,
         "credential_type": ct_name,
-        "inputs": inputs or {},
+        "inputs": inputs,
         "state": "present",
     }
     return {k: v for k, v in payload.items() if v not in (None, {}, [])}
@@ -169,20 +166,29 @@ def normalize_inventory(inv: Mapping[str, Any]) -> Dict[str, Any]:
       Inventories in a future enhancement --> emit constructed vars here.
     """
     org = _name(inv.get("organization"))
-    # Only map kind="smart"; standard inventory (kind="normal" or "") should output no kind key.
-    # The return filter below will remove None values.
-    kind_input = inv.get("kind")
-    kind_output = "smart" if kind_input == "smart" else None
+    kind_output = "smart" if inv.get("kind") == "smart" else None
 
     payload = {
         "name": _stripped(inv.get("name")),
         "description": inv.get("description") or "",
         "organization": _stripped(org) if org else None,
-        "variables": {} if inv.get("variables") == "---" else (inv.get("variables") or {}),
+        "variables": inv.get("variables") or {},
         "kind": kind_output,
         "state": "present",
     }
     return {k: v for k, v in payload.items() if v not in (None, {}, [])}
+
+
+def normalize_host(h: Mapping[str, Any]) -> Dict[str, Any]:
+    """Normalize Host from flat inventory_hosts.json into controller_hosts.yml"""
+    payload = {
+        "name": _stripped(h.get("name")),
+        "inventory": _stripped(h.get("inventory_name")),
+        "enabled": True,
+        "variables": h.get("variables") or "",
+        "state": "present",
+    }
+    return payload
 
 
 def normalize_job_template(t: Mapping[str, Any]) -> Dict[str, Any]:
@@ -193,7 +199,6 @@ def normalize_job_template(t: Mapping[str, Any]) -> Dict[str, Any]:
     proj = _name(t.get("project"))
     inv = _name(t.get("inventory"))
     ee = _name(t.get("execution_environment"))
-
     creds = [_stripped(_name(c)) for c in (t.get("credentials") or []) if _name(c)]
 
     payload = {
@@ -255,6 +260,8 @@ def _write_yaml(path: Path, data: Dict[str, Any]) -> None:
         yaml.safe_dump(data, f, sort_keys=False)
 
 
+# ----------------- MAIN -----------------
+
 def main() -> int:
     """
     Main entrypoint:
@@ -263,21 +270,23 @@ def main() -> int:
       * Write YAML files for AAP 2.5 CaC.
     """
     if not EXPORT_DIR.exists():
-        print("ERROR: Missing _export_24 directory with JSON exports. Run the 2.4 export first.", file=sys.stderr)
+        print("ERROR: Missing _export_24 directory with JSON exports.", file=sys.stderr)
         return 2
 
-    orgs = [normalize_org(o) for o in _load_json("organizations")]
+    orgs  = [normalize_org(o) for o in _load_json("organizations")]
     creds = [normalize_credential(c) for c in _load_json("credentials")]
     projs = [normalize_project(p) for p in _load_json("projects")]
-    invs = [normalize_inventory(i) for i in _load_json("inventories")]
-    tmps = [normalize_job_template(t) for t in _load_json("job_templates")]
-    wfts = [normalize_workflow_template(w) for w in _load_json("workflow_job_templates")]
-    ees  = [normalize_execution_environment(e) for e in _load_json("execution_environments")]
+    invs  = [normalize_inventory(i) for i in _load_json("inventories")]
+    hosts = [normalize_host(h) for h in _load_json("inventory_hosts")]
+    tmps  = [normalize_job_template(t) for t in _load_json("job_templates")]
+    wfts  = [normalize_workflow_template(w) for w in _load_json("workflow_job_templates")]
+    ees   = [normalize_execution_environment(e) for e in _load_json("execution_environments")]
 
     _write_yaml(OUTPUT_DIR / "controller_organizations.yml", {"controller_organizations": orgs})
     _write_yaml(OUTPUT_DIR / "controller_credentials.yml", {"controller_credentials": creds})
     _write_yaml(OUTPUT_DIR / "controller_projects.yml", {"controller_projects": projs})
     _write_yaml(OUTPUT_DIR / "controller_inventories.yml", {"controller_inventories": invs})
+    _write_yaml(OUTPUT_DIR / "controller_hosts.yml", {"controller_hosts": hosts})
     _write_yaml(OUTPUT_DIR / "controller_templates.yml", {"controller_templates": tmps})
     _write_yaml(OUTPUT_DIR / "controller_workflows.yml", {"controller_workflows": wfts})
     _write_yaml(OUTPUT_DIR / "controller_execution_environments.yml", {"controller_execution_environments": ees})

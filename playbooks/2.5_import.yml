@@ -17,6 +17,8 @@
       {{ (lookup('file', cac_dir ~ '/controller_projects.yml') | from_yaml).controller_projects | default([]) }}
     controller_inventories: >-
       {{ (lookup('file', cac_dir ~ '/controller_inventories.yml') | from_yaml).controller_inventories | default([]) }}
+    controller_hosts: >-
+      {{ (lookup('file', cac_dir ~ '/controller_hosts.yml') | from_yaml).controller_hosts | default([]) }}
     controller_templates: >-
       {{ (lookup('file', cac_dir ~ '/controller_templates.yml') | from_yaml).controller_templates | default([]) }}
     controller_workflows: >-
@@ -35,6 +37,7 @@
     - import_role: { name: controller_projects }
     - import_role: { name: controller_credentials }
     - import_role: { name: controller_inventories }
+    - import_role: { name: controller_hosts }
     - import_role: { name: controller_templates }
     - import_role: { name: controller_workflows }
 

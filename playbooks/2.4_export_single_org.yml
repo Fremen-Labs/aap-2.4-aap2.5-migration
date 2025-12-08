@@ -134,6 +134,43 @@
             return_content: true
           register: org_page
 
+        - name: Set Default Final Results
+          ansible.builtin.set_fact:
+            final_results: "{{ org_page.json.results | default([]) }}"
+
+        - name: Fetch Related Hosts --> Inventories Only
+          ansible.builtin.uri:
+            url: "{{ (controller_hostname | regex_replace('/+$','')) }}{{ item.related.hosts }}?page_size={{ page_size }}"
+            method: GET
+            url_username: "{{ controller_username }}"
+            url_password: "{{ controller_password }}"
+            force_basic_auth: true
+            validate_certs: "{{ controller_validate_certs }}"
+            return_content: true
+          register: inventory_hosts_lookup
+          loop: "{{ org_page.json.results }}"
+          when: 
+            - resource == 'inventories'
+            - (org_page.json.count | default(0) | int) > 0
+            - item.related.hosts is defined
+
+        - name: Merge Hosts Data Into Inventories
+          ansible.builtin.set_fact:
+            final_results: >-
+              {%- set output = [] -%}
+              {%- for item in org_page.json.results -%}
+                {%- set hosts = [] -%}
+                {%- if inventory_hosts_lookup.results is defined -%}
+                  {%- set hosts = inventory_hosts_lookup.results[loop.index0].json.results | default([]) -%}
+                {%- endif -%}
+                {%- set _ = item.update({'related_hosts_data': hosts}) -%}
+                {%- set _ = output.append(item) -%}
+              {%- endfor -%}
+              {{ output }}
+          when: 
+            - resource == 'inventories'
+            - (org_page.json.count | default(0) | int) > 0
+
         - name: Debug Org-Scoped Resource Response
           ansible.builtin.debug:
             msg:
@@ -145,5 +182,42 @@
 
         - name: Write Org-Scoped Export File
           ansible.builtin.copy:
-            content: "{{ (org_page.json.results | default([])) | to_nice_json }}"
+            content: "{{ final_results | to_nice_json }}"
             dest: "{{ export_dir }}/{{ resource }}.json"
+        
+        # ---------- INVENTORY HOSTS EXPORT ----------
+        - name: Export Hosts For Each Inventory --> Flat Host Export
+          vars:
+            inventory_id: "{{ item.id }}"
+            inventory_name: "{{ item.name }}"
+          loop: "{{ lookup('file', export_dir ~ '/inventories.json') | from_json }}"
+          loop_control:
+            label: "{{ inventory_name }}"
+          block:
+
+            - name: Fetch Hosts For Inventory
+              ansible.builtin.uri:
+                url: "{{ api_base }}/inventories/{{ inventory_id }}/hosts/?page_size={{ page_size }}"
+                method: GET
+                url_username: "{{ controller_username }}"
+                url_password: "{{ controller_password }}"
+                force_basic_auth: true
+                validate_certs: "{{ controller_validate_certs }}"
+                return_content: true
+              register: inventory_hosts_page
+
+            - name: Append Inventory Name To Each Host
+              ansible.builtin.set_fact:
+                all_inventory_hosts: >-
+                  {{
+                    (all_inventory_hosts | default([]))
+                    +
+                    (inventory_hosts_page.json.results
+                      | map('combine', {'inventory_name': inventory_name})
+                      | list)
+                  }}
+
+            - name: Write inventory_hosts.json Flat Canonical Host Export
+              ansible.builtin.copy:
+                content: "{{ all_inventory_hosts | default([]) | to_nice_json }}"
+                dest: "{{ export_dir }}/inventory_hosts.json"
