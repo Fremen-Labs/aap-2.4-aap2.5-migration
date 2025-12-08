@@ -38,7 +38,7 @@
     - import_role: { name: controller_credentials }
     - import_role: { name: controller_inventories }
     - import_role: { name: controller_hosts }
-    - import_role: { name: controller_templates }
+    - import_role: { name: controller_job_templates }
     - import_role: { name: controller_workflows }
 
     # Alternative once comfortable:

@@ -194,14 +194,45 @@ def normalize_host(h: Mapping[str, Any]) -> Dict[str, Any]:
 def normalize_job_template(t: Mapping[str, Any]) -> Dict[str, Any]:
     """
     Normalize a Job Template object for controller_templates.
+
+    This produces items compatible with the infra.aap_configuration.controller_job_templates
+    `controller_templates` data structure.
+
+    Notes
+    -----
+    * Relationships are kept by *name* (project, inventory, credentials, EE).
+    * We include only a focused subset of fields that are stable and commonly used:
+      name, description, organization, project, inventory, execution_environment,
+      job_type, playbook, credentials, extra_vars, survey_enabled, limit, verbosity, state.
+    * Additional optional fields (job_tags, skip_tags, labels, etc.) can be
+      added later if needed – the role supports them, but they are not required.
     """
     org = _name(t.get("organization"))
     proj = _name(t.get("project"))
     inv = _name(t.get("inventory"))
     ee = _name(t.get("execution_environment"))
-    creds = [_stripped(_name(c)) for c in (t.get("credentials") or []) if _name(c)]
 
-    payload = {
+    # --- Credentials ---
+    # 2.4 exports may have: a direct "credentials" list of objects, OR credentials only under summary_fields.credentials
+    creds_source: List[Any] = t.get("credentials") or []
+    if not creds_source and isinstance(t.get("summary_fields"), dict):
+        creds_source = t["summary_fields"].get("credentials") or []
+
+    creds: List[str] = [
+        _stripped(_name(c))
+        for c in creds_source
+        if _name(c)
+    ]
+
+    # --- Extra vars ---
+    # Controller returns this as a YAML/JSON string; the CaC role accepts either a dict or a string.
+    extra_vars = t.get("extra_vars")
+
+    # Normalize "no vars" to empty string for readability & CaC parity
+    if isinstance(extra_vars, str) and not extra_vars.strip():
+        extra_vars = ""
+
+    payload: Dict[str, Any] = {
         "name": _stripped(t.get("name")),
         "description": t.get("description") or "",
         "organization": _stripped(org) if org else None,
@@ -210,13 +241,20 @@ def normalize_job_template(t: Mapping[str, Any]) -> Dict[str, Any]:
         "execution_environment": _stripped(ee) if ee else None,
         "job_type": t.get("job_type") or "run",
         "playbook": t.get("playbook"),
-        "credentials": creds,
+        "credentials": creds or [],
+        "extra_vars": extra_vars,
         "survey_enabled": bool(t.get("survey_enabled")),
         "limit": t.get("limit") or "",
-        "verbosity": t.get("verbosity") or 0,
+        "verbosity": int(t.get("verbosity") or 0),
         "state": "present",
     }
-    return {k: v for k, v in payload.items() if v not in (None, [], {})}
+
+    # Keep empty strings and 0 (valid values), but remove None, empty lists, empty dicts
+    return {
+        k: v
+        for k, v in payload.items()
+        if v not in (None, [], {})
+    }
 
 
 def normalize_workflow_template(w: Mapping[str, Any]) -> Dict[str, Any]:
@@ -287,7 +325,7 @@ def main() -> int:
     _write_yaml(OUTPUT_DIR / "controller_projects.yml", {"controller_projects": projs})
     _write_yaml(OUTPUT_DIR / "controller_inventories.yml", {"controller_inventories": invs})
     _write_yaml(OUTPUT_DIR / "controller_hosts.yml", {"controller_hosts": hosts})
-    _write_yaml(OUTPUT_DIR / "controller_templates.yml", {"controller_templates": tmps})
+    _write_yaml(OUTPUT_DIR / "controller_job_templates.yml", {"controller_job_templates": tmps})
     _write_yaml(OUTPUT_DIR / "controller_workflows.yml", {"controller_workflows": wfts})
     _write_yaml(OUTPUT_DIR / "controller_execution_environments.yml", {"controller_execution_environments": ees})
 
