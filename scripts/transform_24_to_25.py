@@ -169,13 +169,17 @@ def normalize_inventory(inv: Mapping[str, Any]) -> Dict[str, Any]:
       Inventories in a future enhancement --> emit constructed vars here.
     """
     org = _name(inv.get("organization"))
-    kind = inv.get("kind") or "normal"
+    # Only map kind="smart"; standard inventory (kind="normal" or "") should output no kind key.
+    # The return filter below will remove None values.
+    kind_input = inv.get("kind")
+    kind_output = "smart" if kind_input == "smart" else None
+
     payload = {
         "name": _stripped(inv.get("name")),
         "description": inv.get("description") or "",
         "organization": _stripped(org) if org else None,
-        "variables": inv.get("variables") or {},
-        "kind": kind,
+        "variables": {} if inv.get("variables") == "---" else (inv.get("variables") or {}),
+        "kind": kind_output,
         "state": "present",
     }
     return {k: v for k, v in payload.items() if v not in (None, {}, [])}
