@@ -1,0 +1,17 @@
+controller_templates:
+  - name: Deploy App
+    description: Optional
+    organization: Example Org
+    project: My Project
+    inventory: Production
+    execution_environment: EE Base
+    job_type: run
+    playbook: deploy.yml
+    credentials:
+      - Machine Cred
+      - Vault Cred
+    extra_vars: ""
+    survey_enabled: false
+    limit: ""
+    verbosity: 0
+    state: present

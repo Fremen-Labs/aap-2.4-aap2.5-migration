@@ -1,0 +1,8 @@
+controller_inventories:
+  - name: Production
+    description: Optional
+    organization: Example Org
+    variables:
+      env: prod
+    kind: smart          # OPTIONAL: only if smart inventory
+    state: present

@@ -1,0 +1,5 @@
+controller_teams:
+  - name: Platform Team
+    description: Core team
+    organization: Example Org
+    state: present

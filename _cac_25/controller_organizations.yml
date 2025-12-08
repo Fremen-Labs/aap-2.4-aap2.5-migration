@@ -1,0 +1,4 @@
+controller_organizations:
+  - name: Example Org
+    description: Optional description
+    state: present

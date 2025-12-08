@@ -1,0 +1,8 @@
+controller_hosts:
+  - name: web01.example.com
+    inventory: Production
+    enabled: true
+    variables:
+      ansible_host: 10.0.1.11
+      ansible_user: ec2-user
+    state: present

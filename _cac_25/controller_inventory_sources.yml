@@ -1,0 +1,9 @@
+controller_inventory_sources:
+  - name: Prod SCM Source
+    inventory: Production
+    source: scm
+    source_project: My Project
+    source_path: inventories/prod.yml
+    update_on_launch: true
+    enabled: true
+    state: present

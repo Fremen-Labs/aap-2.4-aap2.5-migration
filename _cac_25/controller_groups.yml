@@ -1,0 +1,6 @@
+controller_groups:
+  - name: web
+    inventory: Production
+    variables:
+      role: frontend
+    state: present

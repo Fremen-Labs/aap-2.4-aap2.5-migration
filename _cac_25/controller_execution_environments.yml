@@ -1,0 +1,6 @@
+controller_execution_environments:
+  - name: EE Base
+    image: quay.io/ansible/awx-ee:latest
+    organization: Example Org
+    pull: missing
+    state: present

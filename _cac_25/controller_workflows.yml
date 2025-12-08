@@ -1,0 +1,5 @@
+controller_workflows:
+  - name: Deploy Workflow
+    description: Optional
+    organization: Example Org
+    state: present
