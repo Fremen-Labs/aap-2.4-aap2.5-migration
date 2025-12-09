@@ -119,8 +119,15 @@ def normalize_credential(c: Mapping[str, Any]) -> Dict[str, Any]:
     """
     ct = c.get("credential_type") or {}
     ct_name = CREDTYPE_MAP.get(ct.get("name") or c.get("kind"), ct.get("name"))
+    org_name: Optional[str] = None
+    org_field = c.get("organization")
+    if isinstance(org_field, (dict, str)):
+        org_name = _name(org_field)
+    if or_name is None:
+        summary = c.get("summary_fields") or {}
+        if isinstance(summary, Mapping):
+            org_name = _name(summary.get("organization"))
 
-    org = _name(c.get("organization"))
     inputs = dict(c.get("inputs") or {})
     for key in ("password", "secret", "ssh_key_data", "ssh_key_unlock", "token", "client_secret", "become_password"):
         inputs.pop(key, None)
@@ -128,7 +135,7 @@ def normalize_credential(c: Mapping[str, Any]) -> Dict[str, Any]:
     payload = {
         "name": _stripped(c.get("name")),
         "description": c.get("description") or "",
-        "organization": _stripped(org) if org else None,
+        "organization": _stripped(org_name) if org_name else None,
         "credential_type": ct_name,
         "inputs": inputs,
         "state": "present",
