@@ -115,24 +115,45 @@ def normalize_credential(c: Mapping[str, Any]) -> Dict[str, Any]:
     Normalize a Credential object for controller_credentials.
 
     - Converts credential type names/kinds to expected display names.
+    - Resolves organization name from either top-level field or summary_fields.
+    - Resolves credential_type name from either top-level field or summary_fields.
     - Removes sensitive fields from inputs (to be rehydrated from a secret source).
     """
-    ct = c.get("credential_type") or {}
-    ct_name = CREDTYPE_MAP.get(ct.get("name") or c.get("kind"), ct.get("name"))
+
+    ct_name: Optional[str] = None
+
+    ct_field = c.get("credential_type")
+    if isinstance(ct_field, (dict, str)):
+        ct_name = _name(ct_field)
+    if ct_name is None:
+        summary = c.get("summary_fields") or {}
+        if isinstance(summary, Mapping):
+            ct_name = _name(summary.get("credential_type"))
+    if ct_name:
+        ct_name = CREDTYPE_MAP.get(ct_name, ct_name)
+
     org_name: Optional[str] = None
     org_field = c.get("organization")
     if isinstance(org_field, (dict, str)):
         org_name = _name(org_field)
-    if or_name is None:
+    if org_name is None:
         summary = c.get("summary_fields") or {}
         if isinstance(summary, Mapping):
             org_name = _name(summary.get("organization"))
 
     inputs = dict(c.get("inputs") or {})
-    for key in ("password", "secret", "ssh_key_data", "ssh_key_unlock", "token", "client_secret", "become_password"):
+    for key in (
+        "password",
+        "secret",
+        "ssh_key_data",
+        "ssh_key_unlock",
+        "token",
+        "client_secret",
+        "become_password",
+    ):
         inputs.pop(key, None)
 
-    payload = {
+    payload: Dict[str, Any] = {
         "name": _stripped(c.get("name")),
         "description": c.get("description") or "",
         "organization": _stripped(org_name) if org_name else None,
@@ -140,8 +161,9 @@ def normalize_credential(c: Mapping[str, Any]) -> Dict[str, Any]:
         "inputs": inputs,
         "state": "present",
     }
-    return {k: v for k, v in payload.items() if v not in (None, {}, [])}
 
+    # Drop fields that are completely empty / None
+    return {k: v for k, v in payload.items() if v not in (None, {}, [])}
 
 def normalize_project(p: Mapping[str, Any]) -> Dict[str, Any]:
     """
