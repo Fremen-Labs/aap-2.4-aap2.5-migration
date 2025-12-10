@@ -35,7 +35,7 @@ Look at the generated files in `_export_24/`. Open a file like `job_templates.js
 ### 3. Update the Export Playbook (`2.4_export_single_org.yml`)
 If you found related data that needs fetching, you must add an **enrichment loop** to the playbook.
 
-**Reference Implementation**: Look at the **"Fetch Related Hosts --> Inventories Only"** task (around line 141) in `playbooks/2.4_export_single_org.yml`.
+**Reference Implementation**: Look at the **"Fetch Related Hosts --> Inventories Only"** task - around line 141- in `playbooks/2.4_export_single_org.yml`.
 
 **Pattern to Implement:**
 1.  Identify the main loop where resources are processed.
@@ -109,3 +109,22 @@ Check `_cac_25/controller_job_templates.yml`.
 
 ### 7. Test Import (Optional but Recommended)
 Use the `infra.aap_configuration` collection to try applying these files to a developer instance of AAP 2.5 to ensure the schema is valid and the references resolve correctly.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! We ask that you please read our [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+
+## 📄 License
+
+This project is licensed under the MIT License.
+
+You are free to use, modify, and distribute this project as long as the original license terms are preserved.
+See the LICENSE file in the root directory for full details.
+
+If your organization requires a different license model, please open an issue to discuss.
+
+## 📬 Support
+
+For enterprise support, security reporting, or release inquiries, please contact: **info@fremenlabs.com**
